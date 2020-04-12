@@ -1,0 +1,5 @@
+(library
+ (name Echoes)
+ (libraries cohttp-lwt
+            redis-lwt
+            yojson))

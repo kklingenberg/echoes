@@ -1,0 +1,6 @@
+cohttp-lwt=2.5.1
+dune=2.3.1
+ounit2-lwt=2.2.2
+reason=3.5.2
+redis-lwt=0.4
+yojson=1.7.0

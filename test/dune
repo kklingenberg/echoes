@@ -1,0 +1,3 @@
+(test
+ (name Echoes)
+ (libraries Echoes ounit2-lwt))
