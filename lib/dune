@@ -1,5 +1,8 @@
 (library
- (name Echoes)
+ (name echoes)
  (libraries cohttp-lwt
+            dolog
+            threads
+            netstring
             redis-lwt
             yojson))

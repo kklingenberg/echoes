@@ -1,5 +1,5 @@
 (executable
- (public_name Echoes)
- (name Echoes)
- (libraries Echoes)
+ (public_name echoes)
+ (name echoes)
+ (libraries echoes)
  (flags (-ccopt -static -ccopt -no-pie)))

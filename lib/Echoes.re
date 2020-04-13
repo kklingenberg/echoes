@@ -1,1 +1,2 @@
 include Version;
+include Message;

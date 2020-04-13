@@ -23,8 +23,8 @@ RUN sed -e "s/%%VERSION%%/${VERSION}/g" \
 
 RUN eval $(opam env) && \
     dune runtest && \
-    dune build bin/Echoes.exe
+    dune build bin/echoes.exe
 
 FROM scratch
-COPY --from=build /home/opam/app/_build/default/bin/Echoes.exe /bin/Echoes
-ENTRYPOINT ["/bin/Echoes"]
+COPY --from=build /home/opam/app/_build/default/bin/echoes.exe /bin/echoes
+ENTRYPOINT ["/bin/echoes"]
