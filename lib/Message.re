@@ -1,11 +1,31 @@
-module Log = Dolog.Log;
+/* Monadic bind for result */
+let (>>=): (result('a, 't), 'a => result('b, 't)) => result('b, 't) =
+  (o, f) =>
+    switch (o) {
+    | Ok(v) => f(v)
+    | Error(_) as error => error
+    };
+
+/* Reduce errors */
+let join_results: list(result('a, 't)) => result(list('a), 't) =
+  items =>
+    List.fold_right(
+      (e, acc) =>
+        switch (e, acc) {
+        | (Ok(elem), Ok(accum)) => Ok([elem, ...accum])
+        | (Error(_) as error, Ok(_)) => error
+        | (_, Error(_) as error) => error
+        },
+      items,
+      Ok([]),
+    );
 
 module type IdempotencyKeyType = {
   type t;
   let min_length: int;
   let max_length: int;
   let is_safe_char: char => bool;
-  let from_string: string => option(t);
+  let from_string: string => result(t, string);
   let to_string: t => string;
 };
 
@@ -29,15 +49,17 @@ module IdempotencyKey: IdempotencyKeyType = {
   let is_safe_char = c => CharSet.mem(c, base64_alphabet);
 
   let from_string = raw =>
-    if (String.length(raw) >= min_length
-        && String.length(raw) <= max_length
-        && raw
-        |> String.to_seq
-        |> List.of_seq
-        |> List.for_all(is_safe_char)) {
-      Some(Safe(raw));
+    if (String.length(raw) < min_length) {
+      Error("idempotency key is too short");
+    } else if (String.length(raw) > max_length) {
+      Error("idempotency key is too long");
+    } else if (raw
+               |> String.to_seq
+               |> List.of_seq
+               |> List.for_all(is_safe_char)) {
+      Error("idempotency key has invalid characters");
     } else {
-      None;
+      Ok(Safe(raw));
     };
 
   let to_string = (Safe(s)) => s;
@@ -45,8 +67,8 @@ module IdempotencyKey: IdempotencyKeyType = {
 
 module type ActorType = {
   type t;
-  let from_raw: string => option(t);
-  let from_encoded: string => option(t);
+  let from_raw: string => result(t, string);
+  let from_encoded: string => result(t, string);
   let to_raw: t => string;
   let to_encoded: t => string;
 };
@@ -57,9 +79,9 @@ module Actor: ActorType = {
 
   let from_raw = s =>
     switch (s) {
-    | "" => None
+    | "" => Error("empty raw string for actor type")
     | _ =>
-      Some(
+      Ok(
         Encoded(
           s,
           Netencoding.Base64.encode(s)
@@ -76,9 +98,9 @@ module Actor: ActorType = {
       |> Str.global_replace(Str.regexp("-"), "+")
       |> Netencoding.Base64.decode
     ) {
-    | raw when String.length(raw) > 0 => Some(Encoded(raw, s))
-    | exception _
-    | _ => None
+    | raw when String.length(raw) > 0 => Ok(Encoded(raw, s))
+    | exception _ => Error("invalid encoded string for actor type")
+    | _ => Error("empty encoded string for actor type")
     };
 
   let to_raw = (Encoded(raw, _)) => raw;
@@ -143,7 +165,7 @@ let serialize_message: message => string =
         `Assoc([
           ("type", `Stringlit("ack")),
           (
-            "idempotency_key",
+            "idempotencyKey",
             `Stringlit(IdempotencyKey.to_string(m.idempotency_key)),
           ),
           ("destination", `Stringlit(Actor.to_raw(m.destination))),
@@ -153,7 +175,7 @@ let serialize_message: message => string =
         `Assoc([
           ("type", `Stringlit("msg")),
           (
-            "idempotency_key",
+            "idempotencyKey",
             `Stringlit(IdempotencyKey.to_string(m.idempotency_key)),
           ),
           ("origin", `Stringlit(Actor.to_raw(m.origin))),
@@ -166,159 +188,133 @@ let serialize_message: message => string =
 let deserialize_string_field = (items, field, mapfn) =>
   switch (List.assoc(field, items)) {
   | `Stringlit(s) => mapfn(s)
-  | exception Not_found => None
-  | _ => None
+  | exception Not_found => Error(Printf.sprintf("field %s not found", field))
+  | _ =>
+    Error(Printf.sprintf("invalid %s field: not a string literal", field))
   };
-
-let propagate_none: list(option('a)) => option(list('a)) =
-  items =>
-    List.fold_right(
-      (e, acc) =>
-        switch (e, acc) {
-        | (Some(elem), Some(accum)) => Some([elem, ...accum])
-        | _ => None
-        },
-      items,
-      Some([]),
-    );
 
 let deserialize_stringlist_field = (items, field, mapfn) =>
   switch (List.assoc(field, items)) {
-  | `Stringlit(s) =>
-    Str.split(Str.regexp(","), s)
-    |> List.map(String.trim)
-    |> List.map(mapfn)
-    |> propagate_none
   | `List(subitems) =>
-    List.map(
-      v =>
+    List.mapi(
+      (index, v) =>
         switch (v) {
         | `Stringlit(s) => mapfn(s)
-        | _ => None
+        | _ =>
+          Error(
+            Printf.sprintf(
+              "invalid %s field: element #%d is not a string literal",
+              field,
+              index,
+            ),
+          )
         },
       subitems,
     )
-    |> propagate_none
-  | exception Not_found => None
-  | _ => None
+    |> join_results
+  | exception Not_found => Error(Printf.sprintf("field %s not found", field))
+  | _ => Error(Printf.sprintf("invalid %s field: it is not a list", field))
   };
 
 let deserialize_variant = (items, field) =>
   switch (List.assoc(field, items)) {
-  | exception Not_found => None
-  | v => Some(v)
+  | exception Not_found => Error(Printf.sprintf("field %s not found", field))
+  | v => Ok(v)
   };
 
-let deserialize_stored_message: (Actor.t, string) => option(message) =
+let deserialize_stored_message: (Actor.t, string) => result(message, string) =
   (actor, serialized) => {
     open Yojson.Raw;
 
-    let deserialize_stored_ack = items => {
-      let idempotency_key =
-        deserialize_string_field(
-          items,
-          "idempotency_key",
-          IdempotencyKey.from_string,
-        );
-      let destination =
-        deserialize_string_field(items, "destination", Actor.from_raw);
-      switch (idempotency_key, destination) {
-      | (Some(k), Some(d)) =>
-        Some(Ack({idempotency_key: k, origin: actor, destination: d}))
-      | (None, _) =>
-        Log.error("Invalid or missing idempotency_key in stored message");
-        None;
-      | (_, None) =>
-        Log.error("Invalid or missing destination in stored message");
-        None;
-      };
-    };
+    let deserialize_stored_ack = items =>
+      deserialize_string_field(
+        items,
+        "idempotencyKey",
+        IdempotencyKey.from_string,
+      )
+      >>= (
+        k =>
+          deserialize_string_field(items, "destination", Actor.from_raw)
+          >>= (
+            d => Ok(Ack({idempotency_key: k, origin: actor, destination: d}))
+          )
+      );
 
-    let deserialize_stored_msg = items => {
-      let idempotency_key =
-        deserialize_string_field(
-          items,
-          "idempotency_key",
-          IdempotencyKey.from_string,
-        );
-      let origin = deserialize_string_field(items, "origin", Actor.from_raw);
-      let body = deserialize_variant(items, "body");
-
-      switch (idempotency_key, origin, body) {
-      | (Some(k), Some(o), Some(b)) =>
-        Some(
-          ActorMessage({idempotency_key: k, origin: o, destination: actor, body: b}),
-        )
-      | (None, _, _) =>
-        Log.error("Invalid or missing idempotency_key in stored message");
-        None;
-      | (_, None, _) =>
-        Log.error("Invalid or missing origin in stored message");
-        None;
-      | (_, _, None) =>
-        Log.error("Missing body in stored message");
-        None;
-      };
-    };
+    let deserialize_stored_msg = items =>
+      deserialize_string_field(
+        items,
+        "idempotencyKey",
+        IdempotencyKey.from_string,
+      )
+      >>= (
+        k =>
+          deserialize_string_field(items, "origin", Actor.from_raw)
+          >>= (
+            o =>
+              deserialize_variant(items, "body")
+              >>= (
+                b =>
+                  Ok(
+                    ActorMessage({
+                      idempotency_key: k,
+                      origin: o,
+                      destination: actor,
+                      body: b,
+                    }),
+                  )
+              )
+          )
+      );
 
     switch (from_string(serialized)) {
     | `Assoc(items) =>
       switch (List.assoc("type", items)) {
       | `Stringlit("ack") => deserialize_stored_ack(items)
       | `Stringlit("msg") => deserialize_stored_msg(items)
-      | exception Not_found =>
-        Log.error("Missing message type");
-        None;
+      | exception Not_found => Error("missing stored message type")
       | `Stringlit(t) =>
-        Log.error("Invalid stored message type: %s", t);
-        None;
-      | _ =>
-        Log.error("Invalid stored message type (not a string literal)");
-        None;
+        Error(Printf.sprintf("invalid stored message type: %s", t))
+      | _ => Error("invalid stored message type (not a string literal)")
       }
-    | exception _ =>
-      Log.error("Invalid stored message (invalid JSON)");
-      None;
-    | _ =>
-      Log.error("Invalid stored message (not a JSON object)");
-      None;
+    | exception _ => Error("invalid stored message (invalid JSON)")
+    | _ => Error("invalid stored message (not a JSON object)")
     };
   };
 
-let deserialize_enveloped_message: (Actor.t, string) => result(list(message), string) =
+let deserialize_enveloped_message:
+  (Actor.t, string) => result(list(message), string) =
   (actor, serialized) =>
     Yojson.Raw.(
       switch (from_string(serialized)) {
       | `Assoc(items) =>
-        let idempotency_key =
-          deserialize_string_field(
-            items,
-            "idempotency_key",
-            IdempotencyKey.from_string,
-          );
-        let destinations =
-          deserialize_stringlist_field(items, "destination", Actor.from_raw);
-        let body = deserialize_variant(items, "body");
-        switch (idempotency_key, destinations, body) {
-        | (Some(k), Some(ds), Some(b)) =>
-          Ok(
-            List.map(
-              d =>
-                ActorMessage({
-                  idempotency_key: k,
-                  origin: actor,
-                  destination: d,
-                  body: b,
-                }),
-              ds,
-            ),
-          )
-        | (None, _, _) =>
-          Error("Invalid or missing idempotency_key in enveloped message")
-        | (_, None, _) =>
-          Error("Invalid or missing destination in enveloped message")
-        | (_, _, None) => Error("Missing body in enveloped message")
-        };
+        deserialize_string_field(
+          items,
+          "idempotencyKey",
+          IdempotencyKey.from_string,
+        )
+        >>= (
+          k =>
+            deserialize_stringlist_field(items, "destination", Actor.from_raw)
+            >>= (
+              ds =>
+                deserialize_variant(items, "body")
+                >>= (
+                  b =>
+                    Ok(
+                      List.map(
+                        d =>
+                          ActorMessage({
+                            idempotency_key: k,
+                            origin: actor,
+                            destination: d,
+                            body: b,
+                          }),
+                        ds,
+                      ),
+                    )
+                )
+            )
+        )
       | exception _ => Error("Invalid enveloped message (invalid JSON)")
       | _ => Error("Invalid enveloped message (not a JSON object)")
       }
