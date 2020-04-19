@@ -21,6 +21,26 @@ type message =
 
 type t = message;
 
+let acks_from_messages = msgs =>
+  msgs
+  |> List.filter(msg =>
+       switch (msg) {
+       | Ack(_) => false
+       | ActorMessage(_) => true
+       }
+     )
+  |> List.map(msg =>
+       switch (msg) {
+       | Ack(_) => msg
+       | ActorMessage(m) =>
+         Ack({
+           idempotency_key: m.idempotency_key,
+           origin: m.origin,
+           destination: m.destination,
+         })
+       }
+     );
+
 let message_key: message => string =
   msg =>
     switch (msg) {
@@ -89,7 +109,7 @@ let pull_stringlist = (items, field) =>
         },
       subitems,
     )
-    |> join_results
+    |> join_list
   | exception Not_found => Error([Printf.sprintf("field %s not found", field)])
   | _ => Error([Printf.sprintf("invalid %s field: it is not a list", field)])
   };
@@ -146,9 +166,7 @@ let deserialize_enveloped_message:
       | `Assoc(items) =>
         join3(
           pull_string(items, "idempotencyKey") >>= IdempotencyKey.from_string,
-          pull_stringlist(items, "destination")
-          >>= join_results
-          % List.map(Actor.from_raw),
+          pull_stringlist(items, "destination") >>= join_list % List.map(Actor.from_raw),
           pull_variant(items, "body"),
         )
         >>= (
