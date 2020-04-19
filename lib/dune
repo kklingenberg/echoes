@@ -1,6 +1,6 @@
 (library
  (name echoes)
- (libraries cohttp-lwt
+ (libraries cohttp-lwt-unix
             dolog
             threads
             netstring

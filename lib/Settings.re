@@ -5,6 +5,7 @@ type t = {
   redis_port: int,
   redis_key_prefix: string,
   redis_expiration_seconds: int,
+  redis_page_size: int,
   server_port: int,
   log_level: Log.log_level,
   sealed: bool,
@@ -16,6 +17,7 @@ let defaults: t = {
   redis_port: 6379,
   redis_key_prefix: "echoes:",
   redis_expiration_seconds: 60 * 60 * 24 * 7,
+  redis_page_size: 50,
   server_port: 8000,
   log_level: Log.INFO,
   sealed: true,
@@ -27,9 +29,9 @@ let current = ref({...defaults, sealed: false});
 Log.set_output(stdout);
 Log.set_log_level(current^.log_level);
 
-module StringMap = Map.Make(String);
+module CliOptionMap = Map.Make(String);
 
-let initialize = (cli_args: StringMap.t(string)) =>
+let initialize = (cli_args: CliOptionMap.t(string)) =>
   if (current^.sealed) {
     Log.warn("Settings are already initialized! Ignoring initialize() call...");
   } else {
@@ -43,7 +45,7 @@ let initialize = (cli_args: StringMap.t(string)) =>
           Log.warn("Invalid %s value: %s", env_key, Sys.getenv(env_key));
           default;
         };
-      switch (mapfn(StringMap.find(cli_args_key, cli_args))) {
+      switch (mapfn(CliOptionMap.find(cli_args_key, cli_args))) {
       | v when List.for_all(p => p(v), predicates) => v
       | exception Not_found => fromenv()
       | exception _
@@ -51,7 +53,7 @@ let initialize = (cli_args: StringMap.t(string)) =>
         Log.warn(
           "Invalid %s option: %s",
           cli_args_key,
-          StringMap.find(cli_args_key, cli_args),
+          CliOptionMap.find(cli_args_key, cli_args),
         );
         default;
       };
@@ -90,6 +92,14 @@ let initialize = (cli_args: StringMap.t(string)) =>
             int_of_string,
             defaults.redis_expiration_seconds,
             [t => t > 0],
+          ),
+        redis_page_size:
+          variable(
+            "--redis-page-size",
+            "REDIS_PAGE_SIZE",
+            int_of_string,
+            defaults.redis_page_size,
+            [p => p > 0],
           ),
         server_port:
           variable(

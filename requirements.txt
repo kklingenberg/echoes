@@ -1,4 +1,4 @@
-cohttp-lwt=2.5.1
+cohttp-lwt-unix=2.5.1
 dolog=4.0.0
 dune=2.3.1
 ocamlnet=4.1.7
