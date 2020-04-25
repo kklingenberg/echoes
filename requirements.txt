@@ -1,6 +1,6 @@
-cohttp-lwt-unix=2.5.1
 dolog=4.0.0
 dune=2.3.1
+httpaf-lwt-unix=0.6.5
 ocamlnet=4.1.7
 ounit2-lwt=2.2.2
 reason=3.5.2

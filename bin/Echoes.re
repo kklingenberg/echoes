@@ -139,9 +139,8 @@ let main = () => {
     );
   } else {
     initialize(opts);
-    let _ = Lwt_unix.on_signal(Sys.sigterm, _ => failwith("Caught SIGTERM"));
-    let _ = Lwt_unix.on_signal(Sys.sigint, _ => failwith("Caught SIGINT"));
-    Lwt_main.run(Echoes.Service.server());
+    let server = Echoes.Service.server("0.0.0.0", Echoes.Settings.current^.server_port);
+    Lwt_main.run(server);
   };
 };
 
