@@ -1,4 +1,5 @@
 open Utils;
+open Utils.Result;
 
 type ack = {
   idempotency_key: IdempotencyKey.t,
@@ -6,7 +7,7 @@ type ack = {
   destination: Actor.t,
 };
 
-type message_body = Yojson.Raw.t;
+type message_body = Yojson.Safe.t;
 
 type actor_message = {
   idempotency_key: IdempotencyKey.t,
@@ -62,31 +63,30 @@ let message_key: message => string =
       )
     };
 
-let serialize_message: message => string =
+let serialize_message: message => Yojson.Safe.t =
   msg =>
-    Yojson.Raw.(
-      switch (msg) {
-      | Ack(m) =>
-        `Assoc([
-          ("type", `Stringlit("ack")),
-          ("idempotencyKey", `Stringlit(IdempotencyKey.to_string(m.idempotency_key))),
-          ("destination", `Stringlit(Actor.to_raw(m.destination))),
-        ])
-        |> to_string
-      | ActorMessage(m) =>
-        `Assoc([
-          ("type", `Stringlit("msg")),
-          ("idempotencyKey", `Stringlit(IdempotencyKey.to_string(m.idempotency_key))),
-          ("origin", `Stringlit(Actor.to_raw(m.origin))),
-          ("body", m.body),
-        ])
-        |> to_string
-      }
-    );
+    switch (msg) {
+    | Ack(m) =>
+      `Assoc([
+        ("type", `String("ack")),
+        ("idempotencyKey", `String(IdempotencyKey.to_string(m.idempotency_key))),
+        ("destination", `String(Actor.to_raw(m.destination))),
+      ])
+    | ActorMessage(m) =>
+      `Assoc([
+        ("type", `String("msg")),
+        ("idempotencyKey", `String(IdempotencyKey.to_string(m.idempotency_key))),
+        ("origin", `String(Actor.to_raw(m.origin))),
+        ("body", m.body),
+      ])
+    };
+
+let serialize_message_to_string: message => string =
+  msg => Yojson.Safe.to_string(serialize_message(msg));
 
 let pull_string = (items, field) =>
   switch (List.assoc(field, items)) {
-  | `Stringlit(s) => Ok(s)
+  | `String(s) => Ok(s)
   | exception Not_found => Error([Printf.sprintf("field %s not found", field)])
   | _ => Error([Printf.sprintf("invalid %s field: not a string literal", field)])
   };
@@ -97,7 +97,7 @@ let pull_stringlist = (items, field) =>
     List.mapi(
       (index, v) =>
         switch (v) {
-        | `Stringlit(s) => Ok(s)
+        | `String(s) => Ok(s)
         | _ =>
           Error([
             Printf.sprintf(
@@ -122,7 +122,7 @@ let pull_variant = (items, field) =>
 
 let deserialize_stored_message: (Actor.t, string) => result(message, list(string)) =
   (actor, serialized) => {
-    open Yojson.Raw;
+    open Yojson.Safe;
 
     let deserialize_stored_ack = items =>
       join2(
@@ -147,10 +147,10 @@ let deserialize_stored_message: (Actor.t, string) => result(message, list(string
     switch (from_string(serialized)) {
     | `Assoc(items) =>
       switch (List.assoc("type", items)) {
-      | `Stringlit("ack") => deserialize_stored_ack(items)
-      | `Stringlit("msg") => deserialize_stored_msg(items)
+      | `String("ack") => deserialize_stored_ack(items)
+      | `String("msg") => deserialize_stored_msg(items)
       | exception Not_found => Error(["missing stored message type"])
-      | `Stringlit(t) => Error([Printf.sprintf("invalid stored message type: %s", t)])
+      | `String(t) => Error([Printf.sprintf("invalid stored message type: %s", t)])
       | _ => Error(["invalid stored message type (not a string literal)"])
       }
     | exception _ => Error(["invalid stored message (invalid JSON)"])
@@ -161,7 +161,7 @@ let deserialize_stored_message: (Actor.t, string) => result(message, list(string
 let deserialize_enveloped_message:
   (Actor.t, string) => result(list(message), list(string)) =
   (actor, serialized) =>
-    Yojson.Raw.(
+    Yojson.Safe.(
       switch (from_string(serialized)) {
       | `Assoc(items) =>
         join3(

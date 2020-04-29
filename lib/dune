@@ -4,5 +4,6 @@
             dolog
             threads
             netstring
+            calendar
             redis-lwt
             yojson))

@@ -1,21 +1,80 @@
-/*open Lwt.Infix;*/
+open Lwt.Infix;
+module EchoesVersion = Version;
 open Httpaf;
 
 module Log = Dolog.Log;
 
+let base_headers = body =>
+  Headers.of_list([
+    /* CORS headers */
+    ("Access-Control-Allow-Credentials", "true"),
+    ("Access-Control-Allow-Origin", "*"),
+    /* HTTP 1.1 connection header */
+    ("Connection", "keep-alive"),
+    /* Everything here is JSON */
+    ("Content-Type", "application/json"),
+    ("Content-Length", string_of_int(String.length(body))),
+    /* Date of the response */
+    (
+      "Date",
+      CalendarLib.Printer.Calendar.sprint(
+        "%a, %d %b %Y %H:%M:%S GMT",
+        CalendarLib.Calendar.to_gmt(CalendarLib.Calendar.now()),
+      ),
+    ),
+    /* Server version */
+    ("Server", Printf.sprintf("echoes/%s", EchoesVersion.version)),
+  ]);
+
 module Response = {
-  type body =
-    | Simple(string)
-    | Stream(int => Lwt.t(option(string)));
-  let of_string = b => Simple(b);
-  let of_stream = b => Stream(b);
-  type t = (body, int, Headers.t);
-  let make = (~status: int=200, ~headers: Headers.t=Headers.empty, b: body): t => (
-    b,
+  type t = (string, int);
+  let body = fst;
+  let status = snd;
+  let raw = (~status: int=200, b: string): t => (b, status);
+  let json = (~status: int=200, b: Yojson.Safe.t) => (
+    Yojson.Safe.to_string(b),
     status,
-    headers,
+  );
+  let error = (~status: int=500, details: list(string)) => (
+    Yojson.Safe.(
+      to_string(
+        `Assoc([
+          (
+            "error",
+            `String(
+              switch (status) {
+              | 400 => "Bad request"
+              | 401 => "Unauthorized"
+              | 403 => "Forbidden"
+              | 404 => "Not found"
+              | 405 => "Method not allowed"
+              | 500 => "Internal server error"
+              | 501 => "Not implemented"
+              | 502 => "Bad gateway"
+              | 503 => "Service unavailable"
+              | 504 => "Gateway timeout"
+              | _ => "Unknown error"
+              },
+            ),
+          ),
+          ("status", `Int(status)),
+          ("details", `List(List.map(detail => `String(detail), details))),
+        ]),
+      )
+    ),
+    status,
   );
 };
+
+let respond = (reqd: Reqd.t, response: Response.t) =>
+  Reqd.respond_with_string(
+    reqd,
+    Httpaf.Response.create(
+      ~headers=base_headers(Response.body(response)),
+      Status.of_code(Response.status(response)),
+    ),
+    Response.body(response),
+  );
 
 module Route = {
   type handler = (Httpaf.Reqd.t, list(string)) => Lwt.t(Response.t);
@@ -81,59 +140,64 @@ let make_request_handler = (routes, _, reqd) => {
       },
       routes,
     );
-  let route =
-    List.nth_opt(
-      List.filter_map(
-        r => {
-          let ((_, method, handler), params) = r;
-          if (Reqd.request(reqd).meth == method) {
-            Some((handler, params));
-          } else {
-            None;
-          };
-        },
-        matched,
-      ),
-      0,
+  let matched_routes =
+    List.filter_map(
+      r => {
+        let ((_, method, handler), params) = r;
+        if (Reqd.request(reqd).meth == method) {
+          Some((handler, params));
+        } else {
+          None;
+        };
+      },
+      matched,
     );
+  if (List.length(matched_routes) > 1) {
+    Log.warn("Path %s matched by several routes", path);
+  };
+  let route = List.nth_opt(matched_routes, 0);
   switch (route) {
   | None when List.length(matched) == 0 =>
-    Reqd.respond_with_string(
+    respond(
       reqd,
-      Httpaf.Response.create(
-        ~headers=Headers.of_list([("Connection", "close")]),
-        `Not_found,
+      Response.error(
+        ~status=404,
+        [Printf.sprintf("No route matched the given path: %s", path)],
       ),
-      "Not found!",
     )
   | None =>
-    Reqd.respond_with_string(
+    respond(
       reqd,
-      Httpaf.Response.create(
-        ~headers=Headers.of_list([("Connection", "close")]),
-        `Method_not_allowed,
+      Response.error(
+        ~status=405,
+        [
+          Printf.sprintf(
+            "A route matched the given path, but the specified method is not appropriate: %s",
+            Method.to_string(Reqd.request(reqd).meth),
+          ),
+        ],
       ),
-      "Wrong method!",
     )
-  | Some(_) =>
-    Reqd.respond_with_string(
-      reqd,
-      Httpaf.Response.create(
-        ~headers=Headers.of_list([("Connection", "close")]),
-        `OK,
-      ),
-      "All good!",
+  | Some((handler, params)) =>
+    Lwt.async(() =>
+      Lwt.catch(
+        () => handler(reqd, params),
+        ex => Lwt.return(Response.error(~status=500, [Printexc.to_string(ex)])),
+      )
+      >|= respond(reqd)
     )
   };
 };
 
 let error_handler = (_, ~request as _=?, error, start_response) => {
-  let response_body = start_response(Headers.empty);
-  switch (error) {
-  | `Exn(_) =>
-    Body.write_string(response_body, "Exception happened; oops");
-    Body.write_string(response_body, "\n");
-  | _ => Body.write_string(response_body, "Something else happened")
-  };
+  let error_response =
+    switch (error) {
+    | `Exn(ex) => Response.error(~status=500, [Printexc.to_string(ex)])
+    | `Bad_request => Response.error(~status=400, [])
+    | `Bad_gateway => Response.error(~status=502, [])
+    | `Internal_server_error => Response.error(~status=500, [])
+    };
+  let response_body = start_response(base_headers(Response.body(error_response)));
+  Body.write_string(response_body, Response.body(error_response));
   Body.close_writer(response_body);
 };

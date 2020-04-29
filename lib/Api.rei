@@ -1,9 +1,10 @@
 module Response: {
-  type body;
-  let of_string: string => body;
-  let of_stream: (int => Lwt.t(option(string))) => body;
   type t;
-  let make: (~status: int=?, ~headers: Httpaf.Headers.t=?, body) => t;
+  let body: t => string;
+  let status: t => int;
+  let raw: (~status: int=?, string) => t;
+  let json: (~status: int=?, Yojson.Safe.t) => t;
+  let error: (~status: int=?, list(string)) => t;
 };
 
 module Route: {

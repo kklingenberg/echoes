@@ -21,7 +21,7 @@ let save_messages: (list(Message.t), C.connection) => Lwt.t(unit) =
               conn,
               Message.message_key(msg),
               Settings.current^.redis_expiration_seconds,
-              Message.serialize_message(msg),
+              Message.serialize_message_to_string(msg),
             )
         ),
       Lwt.return(),
@@ -71,7 +71,7 @@ let messages_for_actor: (Actor.t, C.connection) => Lwt.t(list((string, Message.t
                    false;
                  }
                )
-            |> List.rev_map(pair => (fst(pair), Utils.get_ok(snd(pair))))
+            |> List.rev_map(pair => (fst(pair), Utils.Result.get_ok(snd(pair))))
         );
       }
     );
