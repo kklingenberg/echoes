@@ -93,6 +93,19 @@ let collect_options: unit => CliOptionMap.t(string) =
           ),
         ),
         (
+          "--server-listen",
+          Arg.String(
+            address =>
+              filled_opts := CliOptionMap.add("--server-listen", address, filled_opts^),
+          ),
+          Printf.sprintf(
+            "
+                 The listening address used by the echoes server
+                 (default: SERVER_LISTEN env variable, or '%s')",
+            Unix.string_of_inet_addr(defaults.server_listen),
+          ),
+        ),
+        (
           "--server-port",
           Arg.Int(
             port =>
@@ -139,7 +152,11 @@ let main = () => {
     );
   } else {
     initialize(opts);
-    let server = Echoes.Service.server("0.0.0.0", Echoes.Settings.current^.server_port);
+    let server =
+      Echoes.Service.server(
+        Echoes.Settings.current^.server_listen,
+        Echoes.Settings.current^.server_port,
+      );
     Lwt_main.run(server);
   };
 };

@@ -69,4 +69,28 @@ module Result = {
       | (Error(_) as error, Ok(_)) => error
       | (Error(ef), Error(erest)) => Error(ef @ erest)
       };
+
+  let join5:
+    (
+      result('a, list('t)),
+      result('b, list('t)),
+      result('c, list('t)),
+      result('d, list('t)),
+      result('e, list('t))
+    ) =>
+    result(('a, 'b, 'c, 'd, 'e), list('t)) =
+    (first, second, third, fourth, fifth) =>
+      switch (first, join4(second, third, fourth, fifth)) {
+      | (Ok(fst), Ok((snd, thd, fth, ffth))) => Ok((fst, snd, thd, fth, ffth))
+      | (Ok(_), Error(_) as error) => error
+      | (Error(_) as error, Ok(_)) => error
+      | (Error(ef), Error(erest)) => Error(ef @ erest)
+      };
 };
+
+/* Datetime utils */
+let string_of_now = () =>
+  CalendarLib.Printer.Calendar.sprint(
+    "%Y-%m-%dT%H:%M:%SZ",
+    CalendarLib.Calendar.to_gmt(CalendarLib.Calendar.now()),
+  );

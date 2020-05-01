@@ -6,6 +6,7 @@ type t = {
   redis_key_prefix: string,
   redis_expiration_seconds: int,
   redis_page_size: int,
+  server_listen: Unix.inet_addr,
   server_port: int,
   log_level: Log.log_level,
   sealed: bool,
@@ -18,6 +19,7 @@ let defaults: t = {
   redis_key_prefix: "echoes:",
   redis_expiration_seconds: 60 * 60 * 24 * 7,
   redis_page_size: 50,
+  server_listen: Unix.inet_addr_of_string("127.0.0.1"),
   server_port: 8000,
   log_level: Log.INFO,
   sealed: true,
@@ -100,6 +102,14 @@ let initialize = (cli_args: CliOptionMap.t(string)) =>
             int_of_string,
             defaults.redis_page_size,
             [p => p > 0],
+          ),
+        server_listen:
+          variable(
+            "--server-listen",
+            "SERVER_LISTEN",
+            Unix.inet_addr_of_string,
+            defaults.server_listen,
+            [],
           ),
         server_port:
           variable(

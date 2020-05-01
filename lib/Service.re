@@ -5,7 +5,7 @@ module Log = Dolog.Log;
 
 let server = (addr, port) =>
   Lwt_io.establish_server_with_client_socket(
-    Unix.(ADDR_INET(inet_addr_of_string(addr), port)),
+    Unix.(ADDR_INET(addr, port)),
     Server.create_connection_handler(
       ~request_handler=Api.make_request_handler(Endpoints.routes),
       ~error_handler=Api.error_handler,
@@ -13,7 +13,11 @@ let server = (addr, port) =>
   )
   >>= (
     srv => {
-      Log.info("Started echoes server listening to %s:%d", addr, port);
+      Log.info(
+        "Started echoes server listening to %s:%d",
+        Unix.string_of_inet_addr(addr),
+        port,
+      );
       let (cycle, finish) = Lwt.task();
       let _ =
         Lwt_unix.on_signal(

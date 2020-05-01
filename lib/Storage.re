@@ -19,9 +19,9 @@ let save_messages: (list(Message.t), C.connection) => Lwt.t(unit) =
           () =>
             C.setex(
               conn,
-              Message.message_key(msg),
+              Message.storage_key(msg),
               Settings.current^.redis_expiration_seconds,
-              Message.serialize_message_to_string(msg),
+              Message.serialize_to_string(msg),
             )
         ),
       Lwt.return(),
@@ -58,7 +58,10 @@ let messages_for_actor: (Actor.t, C.connection) => Lwt.t(list((string, Message.t
             |> List.filter(pair => Option.is_some(snd(pair)))
             |> List.rev_map(pair => (fst(pair), Option.get(snd(pair))))
             |> List.rev_map(pair =>
-                 (fst(pair), Message.deserialize_stored_message(actor, snd(pair)))
+                 (
+                   fst(pair),
+                   Message.deserialize_stored_from_string(actor, snd(pair)),
+                 )
                )
             |> List.filter(pair =>
                  switch (pair) {
