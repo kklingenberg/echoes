@@ -21,7 +21,7 @@ let from_string = raw =>
     Error(["idempotency key is too short"]);
   } else if (String.length(raw) > max_length) {
     Error(["idempotency key is too long"]);
-  } else if (raw |> String.to_seq |> List.of_seq |> List.for_all(is_safe_char)) {
+  } else if (!(raw |> String.to_seq |> List.of_seq |> List.for_all(is_safe_char))) {
     Error(["idempotency key has invalid characters"]);
   } else {
     Ok(Safe(raw));

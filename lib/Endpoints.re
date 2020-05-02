@@ -29,6 +29,19 @@ let slurp_request = reqd => {
   promise;
 };
 
+let read_outgoing = (actor, conn) =>
+  Storage.messages_for_actor(actor, conn)
+  >>= (
+    outgoing => {
+      let keys = List.map(fst, outgoing);
+      let outgoing_messages = List.map(snd, outgoing);
+      let acks = Message.acks_from_many(outgoing_messages);
+      Storage.purge_keys(keys, conn)
+      >>= (() => Storage.save_messages(acks, conn))
+      >|= (() => outgoing_messages);
+    }
+  );
+
 let routes: list(Route.t) = [
   /* Show version information. */
   Route.get("/", (_, _) =>
@@ -54,27 +67,10 @@ let routes: list(Route.t) = [
           | Ok(incoming_messages) =>
             Storage.with_connection(conn =>
               Storage.save_messages(incoming_messages, conn)
-              >>= (
-                () =>
-                  Storage.messages_for_actor(actor, conn)
-                  >>= (
-                    outgoing => {
-                      let keys = List.map(fst, outgoing);
-                      let outgoing_messages = List.map(snd, outgoing);
-                      let acks = Message.acks_from_many(outgoing_messages);
-                      Storage.purge_keys(keys, conn)
-                      >>= (
-                        () =>
-                          Storage.save_messages(acks, conn)
-                          >|= (
-                            () =>
-                              Response.json(
-                                `List(List.map(Message.serialize, outgoing_messages)),
-                              )
-                          )
-                      );
-                    }
-                  )
+              >>= (() => read_outgoing(actor, conn))
+              >|= (
+                outgoing_messages =>
+                  Response.json(`List(List.map(Message.serialize, outgoing_messages)))
               )
             )
           | Error(details) => Lwt.return(Response.error(~status=400, details))
@@ -98,7 +94,7 @@ let routes: list(Route.t) = [
             >|= (
               () =>
                 Response.json(
-                  `Assoc([("received", `Int(List.length(incoming_messages)))]),
+                  `Assoc([("sent", `Int(List.length(incoming_messages)))]),
                 )
             )
           | Error(details) => Lwt.return(Response.error(~status=400, details))
@@ -111,24 +107,10 @@ let routes: list(Route.t) = [
     "/receive",
     expect_actor((_, _, actor) =>
       Storage.with_connection(conn =>
-        Storage.messages_for_actor(actor, conn)
-        >>= (
-          outgoing => {
-            let keys = List.map(fst, outgoing);
-            let outgoing_messages = List.map(snd, outgoing);
-            let acks = Message.acks_from_many(outgoing_messages);
-            Storage.purge_keys(keys, conn)
-            >>= (
-              () =>
-                Storage.save_messages(acks, conn)
-                >|= (
-                  () =>
-                    Response.json(
-                      `List(List.map(Message.serialize, outgoing_messages)),
-                    )
-                )
-            );
-          }
+        read_outgoing(actor, conn)
+        >|= (
+          outgoing_messages =>
+            Response.json(`List(List.map(Message.serialize, outgoing_messages)))
         )
       )
     ),

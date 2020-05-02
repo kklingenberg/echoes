@@ -51,34 +51,37 @@ let messages_for_actor: (Actor.t, C.connection) => Lwt.t(list((string, Message.t
     >>= (
       scrolled_keys => {
         let keys = KeySet.elements(scrolled_keys);
-        C.mget(conn, keys)
-        >|= (
-          msgs =>
-            List.combine(keys, msgs)
-            |> List.filter(pair => Option.is_some(snd(pair)))
-            |> List.rev_map(pair => (fst(pair), Option.get(snd(pair))))
-            |> List.rev_map(pair =>
-                 (
-                   fst(pair),
-                   Message.deserialize_stored_from_string(actor, snd(pair)),
+        List.length(keys) == 0 ?
+          Lwt.return([]) :
+          C.mget(conn, keys)
+          >|= (
+            msgs =>
+              List.combine(keys, msgs)
+              |> List.filter(pair => Option.is_some(snd(pair)))
+              |> List.rev_map(pair => (fst(pair), Option.get(snd(pair))))
+              |> List.rev_map(pair =>
+                   (
+                     fst(pair),
+                     Message.deserialize_stored_from_string(actor, snd(pair)),
+                   )
                  )
-               )
-            |> List.filter(pair =>
-                 switch (pair) {
-                 | (_, Ok(_)) => true
-                 | (_, Error(errors)) =>
-                   Log.error(
-                     "Encountered errors during deserialization of stored message:\n%s",
-                     String.concat("\n", errors),
-                   );
-                   false;
-                 }
-               )
-            |> List.rev_map(pair => (fst(pair), Utils.Result.get_ok(snd(pair))))
-        );
+              |> List.filter(pair =>
+                   switch (pair) {
+                   | (_, Ok(_)) => true
+                   | (_, Error(errors)) =>
+                     Log.error(
+                       "Encountered errors during deserialization of stored message:\n%s",
+                       String.concat("\n", errors),
+                     );
+                     false;
+                   }
+                 )
+              |> List.rev_map(pair => (fst(pair), Utils.Result.get_ok(snd(pair))))
+          );
       }
     );
   };
 
 let purge_keys: (list(string), C.connection) => Lwt.t(unit) =
-  (keys, conn) => C.del(conn, keys) >|= (_ => ());
+  (keys, conn) =>
+    List.length(keys) == 0 ? Lwt.return() : C.del(conn, keys) >|= (_ => ());
