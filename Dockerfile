@@ -8,8 +8,8 @@ RUN sudo apk add --update --no-cache m4 && \
   eval $(opam env) && \
   opam update
 
-COPY --chown=opam:nogroup requirements.txt .
-RUN eval $(opam env) && cat requirements.txt | xargs opam install
+COPY --chown=opam:nogroup echoes.opam .
+RUN eval $(opam env) && opam install --deps-only .
 
 COPY --chown=opam:nogroup . .
 

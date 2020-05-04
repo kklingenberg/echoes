@@ -85,3 +85,17 @@ let messages_for_actor: (Actor.t, C.connection) => Lwt.t(list((string, Message.t
 let purge_keys: (list(string), C.connection) => Lwt.t(unit) =
   (keys, conn) =>
     List.length(keys) == 0 ? Lwt.return() : C.del(conn, keys) >|= (_ => ());
+
+let read_outgoing: (Actor.t, C.connection) => Lwt.t(list(Message.t)) =
+  (actor, conn) =>
+    messages_for_actor(actor, conn)
+    >>= (
+      outgoing => {
+        let keys = List.map(fst, outgoing);
+        let outgoing_messages = List.map(snd, outgoing);
+        let acks = Message.acks_from_many(outgoing_messages);
+        purge_keys(keys, conn)
+        >>= (() => save_messages(acks, conn))
+        >|= (() => outgoing_messages);
+      }
+    );
