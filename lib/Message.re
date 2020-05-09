@@ -94,8 +94,8 @@ let serialize_to_string: message => string =
 let pull_string = (items, field) =>
   switch (List.assoc(field, items)) {
   | `String(s) => Ok(s)
-  | exception Not_found => Error([Printf.sprintf("field %s not found", field)])
-  | _ => Error([Printf.sprintf("invalid %s field: not a string literal", field)])
+  | exception Not_found => Error([Printf.sprintf("field '%s' not found", field)])
+  | _ => Error([Printf.sprintf("invalid '%s' field: not a string literal", field)])
   };
 
 let pull_stringlist = (items, field) =>
@@ -108,7 +108,7 @@ let pull_stringlist = (items, field) =>
         | _ =>
           Error([
             Printf.sprintf(
-              "invalid %s field: element #%d is not a string literal",
+              "invalid '%s' field: element #%d is not a string literal",
               field,
               index,
             ),
@@ -117,20 +117,21 @@ let pull_stringlist = (items, field) =>
       subitems,
     )
     |> join_list
-  | exception Not_found => Error([Printf.sprintf("field %s not found", field)])
-  | _ => Error([Printf.sprintf("invalid %s field: it is not a list", field)])
+  | exception Not_found => Error([Printf.sprintf("field '%s' not found", field)])
+  | _ => Error([Printf.sprintf("invalid '%s' field: it is not a list", field)])
   };
 
 let pull_boolean = (items, field) =>
   switch (List.assoc(field, items)) {
   | `Bool(v) => Ok(v)
   | exception Not_found => Ok(false)
-  | _ => Error([Printf.sprintf("invalid %s field: it is not a boolean value", field)])
+  | _ =>
+    Error([Printf.sprintf("invalid '%s' field: it is not a boolean value", field)])
   };
 
 let pull_variant = (items, field) =>
   switch (List.assoc(field, items)) {
-  | exception Not_found => Error([Printf.sprintf("field %s not found", field)])
+  | exception Not_found => Error([Printf.sprintf("field '%s' not found", field)])
   | v => Ok(v)
   };
 
@@ -175,7 +176,7 @@ let deserialize_stored: (Actor.t, Yojson.Safe.t) => result(message, list(string)
       | `String("ack") => deserialize_stored_ack(items)
       | `String("msg") => deserialize_stored_msg(items)
       | exception Not_found => Error(["missing stored message type"])
-      | `String(t) => Error([Printf.sprintf("invalid stored message type: %s", t)])
+      | `String(t) => Error([Printf.sprintf("invalid stored message type: '%s'", t)])
       | _ => Error(["invalid stored message type (not a string literal)"])
       }
 
@@ -220,13 +221,13 @@ let deserialize_enveloped:
           );
         }
       )
-    | _ => Error(["Invalid enveloped message (not a JSON object)"])
+    | _ => Error(["invalid enveloped message (not a JSON object)"])
     };
 
 let deserialize_enveloped_from_string:
   (Actor.t, string) => result(list(message), list(string)) =
   (actor, serialized) =>
     switch (Yojson.Safe.from_string(serialized)) {
-    | exception _ => Error(["Invalid enveloped message (invalid JSON)"])
+    | exception _ => Error(["invalid enveloped message (invalid JSON)"])
     | obj => deserialize_enveloped(actor, obj)
     };

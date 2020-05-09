@@ -11,7 +11,7 @@ let expect_actor = (fn, reqd, params) => {
     | Ok(actor) => fn(reqd, params, actor)
     | Error(details) => Lwt.return(Response.error(~status=400, details))
     }
-  | None => Lwt.return(Response.error(~status=400, ["Missing From header"]))
+  | None => Lwt.return(Response.error(~status=400, ["missing 'From' header"]))
   };
 };
 
@@ -29,7 +29,7 @@ let slurp_request = reqd => {
   promise;
 };
 
-let routes: list(Route.t) = [
+let routes: list(list(Route.t)) = [
   /* Show version information. */
   Route.get("/", (_, _) =>
     Lwt.return(
