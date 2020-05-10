@@ -11,14 +11,14 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Define version
-      run: export VERSION=$(echo ${GITHUB_REF} | cut -d / -f 3)
+      run: echo -n ${GITHUB_REF} | cut -d / -f 3 > version
     - name: Login
       run: docker login docker.pkg.github.com -u kklingenberg -p "${{ secrets.GITHUB_TOKEN }}"
     - name: Build
       run: >-
-        docker build -t docker.pkg.github.com/kklingenberg/echoes/echoes:${VERSION}
-                     --build-arg VERSION=${VERSION}
+        docker build -t docker.pkg.github.com/kklingenberg/echoes/echoes:$(cat version)
+                     --build-arg VERSION=$(cat version)
                      --build-arg SHA1=${GITHUB_SHA}
                      --build-arg BUILD=${GITHUB_RUN_ID}
     - name: Push
-      run: docker push docker.pkg.github.com/kklingenberg/echoes/echoes:${VERSION}
+      run: docker push docker.pkg.github.com/kklingenberg/echoes/echoes:$(cat version)
